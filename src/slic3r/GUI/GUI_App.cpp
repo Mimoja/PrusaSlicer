@@ -479,7 +479,8 @@ static const FileWildcards file_wildcards_by_type[FT_SIZE] = {
 
     /* FT_TEX */     { "Texture"sv,         { ".png"sv, ".svg"sv } },
 
-    /* FT_SL1 */     { "Masked SLA files"sv, { ".sl1"sv, ".sl1s"sv, ".pwmx"sv } },
+    /* FT_SL1 */     { "Masked SLA files"sv, { ".sl1"sv, ".sl1s"sv, ".pwm*"sv, ".pm3*"sv, ".pmx*"sv, ".dlp*"sv, ".dl2p"sv } },
+
 };
 
 #if ENABLE_ALTERNATIVE_FILE_WILDCARDS_GENERATOR

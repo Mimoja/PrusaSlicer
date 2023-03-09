@@ -11,10 +11,13 @@
 #include <boost/log/trivial.hpp>
 
 
-#define TAG_INTRO "ANYCUBIC\0\0\0\0"
-#define TAG_HEADER "HEADER\0\0\0\0\0\0"
+#define TAG_INTRO   "ANYCUBIC\0\0\0\0"
+#define TAG_HEADER  "HEADER\0\0\0\0\0\0"
 #define TAG_PREVIEW "PREVIEW\0\0\0\0\0"
-#define TAG_LAYERS "LAYERDEF\0\0\0\0"
+#define TAG_LAYERS  "LAYERDEF\0\0\0\0"
+#define TAG_EXTRA   "EXTRA\0\0\0\0\0\0\0"
+#define TAG_MACHINE "MACHINE\0\0\0\0\0"
+#define TAG_MACHINE "MODEL\0\0\0\0\0\0\0"
 
 #define CFG_LIFT_DISTANCE "LIFT_DISTANCE"
 #define CFG_LIFT_SPEED "LIFT_SPEED"
@@ -24,6 +27,10 @@
 #define CFG_BOTTOM_LIFT_DISTANCE "BOTTOM_LIFT_DISTANCE"
 #define CFG_ANTIALIASING "ANTIALIASING"
 
+// Introduced with 515
+#define CFG_EXTRA_LIFT_DISTANCE "EXTRA_LIFT_DISTANCE"
+#define CFG_EXTRA_LIFT_SPEED "EXTRA_LIFT_SPEED"
+#define CFG_EXTRA_RETRACT_SPEED "EXTRA_RETRACT_SPEED"
 
 #define PREV_W 224
 #define PREV_H 168
@@ -92,12 +99,16 @@ typedef struct anycubicsla_format_intro
     std::uint32_t version;  // value 1 (also known as 515, 516 and 517)
     std::uint32_t area_num; // Number of tables - usually 4
     std::uint32_t header_data_offset;
-    std::uint32_t software_data_offset; // unused in version 1
+    std::uint32_t software_data_offset; // unused in version 1, 6357060 for 516 only needed for 517
     std::uint32_t preview_data_offset;
     std::uint32_t layer_color_offset; // unused in version 1
     std::uint32_t layer_data_offset;
-    std::uint32_t extra_data_offset; // unused here (only used in version 516)
+    std::uint32_t extra_data_offset; // 516 onwards
+    std::uint32_t machine_data_offset; //Does not exist in <516
     std::uint32_t image_data_offset;
+    std::uint32_t software_data_offset; // 517
+    std::uint32_t model_data_offset; // 517
+    
 } anycubicsla_format_intro;
 
 typedef struct anycubicsla_format_header
@@ -125,6 +136,11 @@ typedef struct anycubicsla_format_header
     std::uint32_t transition_layer_count;
     std::uint32_t transition_layer_type; // usually 0
 
+    std::uint32_t advanced_mode // 516 and onward
+
+    std::uint16_t gray; //517 and onward
+    std::uint16_t blue_level; //517 and onward
+    std::uint32_t resin_code; // //517 and onward, 1579548560
 } anycubicsla_format_header;
 
 typedef struct anycubicsla_format_preview
@@ -137,6 +153,23 @@ typedef struct anycubicsla_format_preview
     // raw image data in BGR565 format
      std::uint8_t pixels[PREV_W * PREV_H * 2];
 } anycubicsla_format_preview;
+
+std::uint8_t grey_lookup = {
+            15, 31, 47,    // 1,2,3
+            63, 79, 95,    // 4,5,6
+            111, 127, 143, // 7,8,9
+            159, 175, 191, // 10,11,12
+            207, 223, 239, // 13,14,15
+            255  // 16
+};
+
+typedef struct anycubicsla_format_layers_colors
+{
+    std::uint32_t use_full_grayscale;
+    std::uint32_t grey_max_count; //typically 16
+    std::uint8_t grey[16];
+    std::uint32_t unknown;
+} anycubicsla_format_layers_colors;
 
 typedef struct anycubicsla_format_layers_header
 {
@@ -164,6 +197,64 @@ typedef struct anycubicsla_format_misc
     std::float_t bottom_lift_speed_mms;
 
 } anycubicsla_format_misc;
+
+
+typedef struct anycubicsla_format_extra
+{
+    char          tag[12];
+    std::uint32_t payload_length; 
+    std::uint32_t bottom_state_num; // 2
+    std::float_t  lift_distance1_mm;
+    std::float_t  lift_speed1_mms;
+    std::float_t  retract_speed1_mms;
+    std::float_t  lift_distance2_mm;
+    std::float_t  lift_speed2_mms;
+    std::float_t  retract_speed2_mms;
+    std::uint32_t state_num; // 2
+    std::float_t  lift_distance3_mm;
+    std::float_t  lift_speed3_mms;
+    std::float_t  retract_speed3_mms;
+    std::float_t  lift_distance4_mm;
+    std::float_t  lift_speed4_mms;
+    std::float_t  retract_speed4_mms;
+} anycubicsla_format_extra;
+
+typedef struct anycubicsla_format_machine
+{
+    char          tag[12];
+    std::uint32_t payload_size;
+    char          name[96];
+    char          image_format[24];
+    std::float_t  volume_x;
+    std::float_t  volume_y;
+    std::float_t  volume_z;
+    std::uint32_t version;
+    std::uint32_t machine140;
+} anycubicsla_format_machine;
+
+typedef struct anycubicsla_format_software
+{
+    char          name[32]; // ANYCUBIC-PC
+    std::uint32_t payload_size; // 164
+    char          version[32];
+    char          operating_system[64]; // win-x64
+    char          opengl_version[32];// 3.3-CoreProfile
+} anycubicsla_format_software;
+
+typedef struct anycubicsla_format_model
+{
+    char          tag[12]; // MODEL
+    std::uint32_t payload_size;
+    
+    std::float minX; 
+    std::float minY;
+    std::float minZ;
+    std::float maxX;
+    std::float maxY;
+    std::float maxZ;
+    std::uint32_t supports_enabled;
+    std::float supports_density;
+} anycubicsla_format_model;
 
 class AnycubicSLAFormatConfigDef : public ConfigDef
 {
@@ -303,6 +394,12 @@ void fill_header(anycubicsla_format_header &h,
     }
     h.res_x     = get_cfg_value_i(cfg, "display_pixels_x");
     h.res_y     = get_cfg_value_i(cfg, "display_pixels_y");
+    auto         dispo_opt = cfg.option("display_orientation");
+    std::string  dispo  = dispo_opt? cfg.option("display_orientation")->serialize() : "landscape";
+    if (dispo == "portrait") {
+        std::swap(h.res_x, h.res_y);
+    }
+
     bottle_weight_g = get_cfg_value_f(cfg, "bottle_weight") * 1000.0f;
     bottle_volume_ml = get_cfg_value_f(cfg, "bottle_volume");
     bottle_cost = get_cfg_value_f(cfg, "bottle_cost");
@@ -359,11 +456,160 @@ void fill_header(anycubicsla_format_header &h,
                      (layer_count * h.delay_before_exposure_s);
 
 
+    std::float_t display_w = get_cfg_value_f(cfg, "display_width", 100) * 1000;
+    if (dispo == "portrait") {
+        h.pixel_size_um = (int)((display_w / h.res_y) + 0.5f);
+    } else {
+        h.pixel_size_um = (int)((display_w / h.res_x) + 0.5f);
+    }
+    
     h.payload_size  = sizeof(h) - sizeof(h.tag) - sizeof(h.payload_size);
-    h.pixel_size_um = 50;
+
+    if (version < ANYCUBIC_SLA_VERSION_516) {
+        h.payload_size -= sizeof(h.advance_mode);
+    }
+    if (version < ANYCUBIC_SLA_VERSION_517){
+        h.payload_size -= sizeof(h.gray);
+        h.payload_size -= sizeof(h.blur_level);
+        h.payload_size -= sizeof(h.resin_code);
+    }
 }
 
-} // namespace
+void fill_color(anycubicsla_format_layers_color &color,){
+    color.use_full_grayscale = 0;
+    color.grey_max_count = 16;
+    for (int i = 0; i < color.grey_max_count; i++) {
+        color.grey[i] = grey_lookup[i];
+    }
+    color.unknown = 0
+}
+
+
+void fill_extra(anycubicsla_format_extra  &e,
+                const SLAPrint     &print)
+{
+    auto        &cfg     = print.full_print_config();
+    auto         mat_opt = cfg.option("material_notes");
+    std::string  mnotes  = mat_opt? cfg.option("material_notes")->serialize() : "";
+    // create a config parser from the material notes
+    Slic3r::PwmxFormatDynamicConfig mat_cfg;
+
+    // sanitize the string config
+    boost::replace_all(mnotes, "\\n", "\n");
+    boost::replace_all(mnotes, "\\r", "\r");
+    mat_cfg.load_from_ini_string(mnotes,
+                                 ForwardCompatibilitySubstitutionRule::Enable);
+
+    // unknown fields - the values from TEST.pwma are used
+    e.extra0 = 24;
+    e.extra4 = 2;
+    e.extra32 = 2;
+
+    // Currently it is unknown when (during printing) these values are applied
+    // and which values (layer section or extra section) have higher priority.
+    // These configurtion options can be set in material notes.
+
+    e.lift_distance1_mm  = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_DISTANCE "1", 1.5f);;
+    e.lift_speed1_mms    = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_SPEED "1", 2.0f);;
+    e.retract_speed1_mms = get_cfg_value_f(mat_cfg, CFG_EXTRA_RETRACT_SPEED "1", 3.0f);;
+
+    e.lift_distance2_mm  = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_DISTANCE "2", 4.5f);;
+    e.lift_speed2_mms    = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_SPEED "2", 4.0f);;
+    e.retract_speed2_mms = get_cfg_value_f(mat_cfg, CFG_EXTRA_RETRACT_SPEED "2", 6.0f);;
+
+    e.lift_distance3_mm  = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_DISTANCE "3", 1.5f);;
+    e.lift_speed3_mms    = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_SPEED "3", 2.0f);;
+    e.retract_speed3_mms = get_cfg_value_f(mat_cfg, CFG_EXTRA_RETRACT_SPEED "3", 3.0f);;
+
+    e.lift_distance4_mm  = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_DISTANCE "4", 4.0f);;
+    e.lift_speed4_mms    = get_cfg_value_f(mat_cfg, CFG_EXTRA_LIFT_SPEED "4", 2.0f);;
+    e.retract_speed4_mms = get_cfg_value_f(mat_cfg, CFG_EXTRA_RETRACT_SPEED "4", 3.0f);;
+
+    // ensure sane values are set
+    crop_value(e.lift_distance1_mm, 0.1f, 100.0f);
+    crop_value(e.lift_distance2_mm, 0.1f, 100.0f);
+    crop_value(e.lift_distance3_mm, 0.1f, 100.0f);
+    crop_value(e.lift_distance4_mm, 0.1f, 100.0f);
+
+    crop_value(e.lift_speed1_mms, 0.1f, 20.0f);
+    crop_value(e.lift_speed2_mms, 0.1f, 20.0f);
+    crop_value(e.lift_speed3_mms, 0.1f, 20.0f);
+    crop_value(e.lift_speed4_mms, 0.1f, 20.0f);
+
+    crop_value(e.retract_speed1_mms, 0.1f, 20.0f);
+    crop_value(e.retract_speed2_mms, 0.1f, 20.0f);
+    crop_value(e.retract_speed3_mms, 0.1f, 20.0f);
+    crop_value(e.retract_speed4_mms, 0.1f, 20.0f);
+}
+
+void fill_machine(anycubicsla_format_machine &m,
+                  const SLAPrint      &print,
+                  int                 version)
+{
+    auto        &cfg     = print.full_print_config();
+    auto         mat_opt = cfg.option("material_notes");
+    std::string  mnotes  = mat_opt? cfg.option("material_notes")->serialize() : "";
+    // create a config parser from the material notes
+    Slic3r::PwmxFormatDynamicConfig mat_cfg;
+    auto        print_opt = cfg.option("printer_notes");
+    std::string pnotes    = print_opt? cfg.option("printer_notes")->serialize() : "";
+    // create a vector of strings from the printer notes
+    std::vector<std::string> pnotes_items;
+
+    // sanitize the  material notes
+    boost::replace_all(mnotes, "\\n", "\n");
+    boost::replace_all(mnotes, "\\r", "\r");
+    mat_cfg.load_from_ini_string(mnotes,
+                                 ForwardCompatibilitySubstitutionRule::Enable);
+
+    // sanitize the printer notes
+    boost::replace_all(pnotes, "\\n", "\n");
+    boost::replace_all(pnotes, "\\r", "\r");
+    boost::split(pnotes_items, pnotes, boost::is_any_of("\n\r"), boost::token_compress_on);
+
+    std::string name = get_vec_value_s(pnotes_items, CFG_EXPORT_MACHINE_NAME, "Photon Mono");
+    std::strncpy((char*) m.name, name.c_str(), sizeof(m.name));
+    std::strncpy((char*) m.image_format, "pw0Img", sizeof(m.image_format));
+
+    m.volume_x = get_cfg_value_f(cfg, "display_width");
+    m.volume_y = get_cfg_value_f(cfg, "display_height");
+    m.volume_z = get_cfg_value_f(cfg, "max_print_height", 160);
+    m.version  = version;
+    m.machine140 = 0x634701; // unknown purpose (found in  TEST.pwma  - Photon Mono 4K)
+    m.payload_size = sizeof(m);
+
+    auto dispo_opt = cfg.option("display_orientation");
+    std::string dispo = dispo_opt? cfg.option("display_orientation")->serialize() : "landscape";
+    if (dispo == "portrait") {
+        std::swap(m.volume_x, m.volume_y);
+    }
+
+
+void fill_software(anycubicsla_format_software &s)
+{
+    strcpy(&s.name, "PRUSASLICER");
+    s.payload_size = 164;
+    s.version = 0;
+    strcpy(&s.opengl_version, "3.3-CoreProfile");
+}      
+
+void fill_model(anycubicsla_format_model &m)
+{
+    /** Taken from UVTools
+    var rect = slicerFile.BoundingRectangleMillimeters;
+    m.maxX = (float)Math.Round(rect.Width / 2, 3);
+    m.minX = -m.maxX;
+
+    m.maxY = (float)Math.Round(rect.Height / 2, 3);
+    m.minY = -m.maxY;
+
+    m.minZ = 0;
+    m.maxZ = slicerFile.PrintHeight;
+    */
+    m.payload_size = sizeof(m);
+}      
+
+}// namespace
 
 std::unique_ptr<sla::RasterBase> AnycubicSLAArchive::create_raster() const
 {
@@ -402,7 +648,14 @@ sla::RasterEncoder AnycubicSLAArchive::get_encoder() const
 {
     return AnycubicSLARasterEncoder{};
 }
+static void anycubicsla_write_int16(std::ofstream &out, std::uint32_t val)
+{
+    const char i1 = (val & 0xFF);
+    const char i2 = (val >> 8) & 0xFF;
 
+    out.write((const char *) &i1, 1);
+    out.write((const char *) &i2, 1);
+}
 // Endian safe write of little endian 32bit ints
 static void anycubicsla_write_int32(std::ofstream &out, std::uint32_t val)
 {
@@ -422,7 +675,7 @@ static void anycubicsla_write_float(std::ofstream &out, std::float_t val)
     anycubicsla_write_int32(out, *f);
 }
 
-static void anycubicsla_write_intro(std::ofstream &out, anycubicsla_format_intro &i)
+static void anycubicsla_write_intro(std::ofstream &out, anycubicsla_format_intro &i, uint32_t version)
 {
     out.write(TAG_INTRO, sizeof(i.tag));
     anycubicsla_write_int32(out, i.version);
@@ -432,11 +685,17 @@ static void anycubicsla_write_intro(std::ofstream &out, anycubicsla_format_intro
     anycubicsla_write_int32(out, i.preview_data_offset);
     anycubicsla_write_int32(out, i.layer_color_offset);
     anycubicsla_write_int32(out, i.layer_data_offset);
-    anycubicsla_write_int32(out, i.extra_data_offset);
+    anycubicsla_write_int32(out, i.extra_data_offset); //515
+    if (version >= ANYCUBIC_SLA_VERSION_516) {
+        anycubicsla_write_int32(out, i.machine_data_offset); //516
+    }
+    if (version >= ANYCUBIC_SLA_VERSION_517) {
+        anycubicsla_write_int32(out, i.model_data_offset); //517
+    }
     anycubicsla_write_int32(out, i.image_data_offset);
 }
 
-static void anycubicsla_write_header(std::ofstream &out, anycubicsla_format_header &h)
+static void anycubicsla_write_header(std::ofstream &out, anycubicsla_format_header &h, uint32_t version)
 {
     out.write(TAG_HEADER, sizeof(h.tag));
     anycubicsla_write_int32(out, h.payload_size);
@@ -460,6 +719,14 @@ static void anycubicsla_write_header(std::ofstream &out, anycubicsla_format_head
     anycubicsla_write_int32(out, h.print_time_s);
     anycubicsla_write_int32(out, h.transition_layer_count);
     anycubicsla_write_int32(out, h.transition_layer_type);
+    if (version >= ANYCUBIC_SLA_VERSION_516) {
+        anycubicsla_write_int32(out, h.advance_mode);
+    }
+    if (version >= ANYCUBIC_SLA_VERSION_517){
+        anycubicsla_write_int16(out, h.gray);
+        anycubicsla_write_int16(out, h.blur_level);
+        anycubicsla_write_int16(out, h.resin_code);
+    }
 }
 
 static void anycubicsla_write_preview(std::ofstream &out, anycubicsla_format_preview &p)
@@ -470,6 +737,77 @@ static void anycubicsla_write_preview(std::ofstream &out, anycubicsla_format_pre
     anycubicsla_write_int32(out, p.preview_dpi);
     anycubicsla_write_int32(out, p.preview_h);
     out.write((const char*) p.pixels, sizeof(p.pixels));
+}
+
+static void anycubicsla_write_layer_color(std::ofstream &out, anycubicsla_format_layers_color &c)
+{
+    anycubicsla_write_int32(out, c.use_full_grayscale);
+    anycubicsla_write_int32(out, c.grey_max_count);
+    for (int i=0; i< c.grey_max_count; i++) {
+        out.write((const char *) &c.grey[i], 1);
+    }
+    anycubicsla_write_int32(out, c.preview_dpi);
+    anycubicsla_write_int32(out, c.unknown);
+}
+
+static void anycubicsla_write_extra(std::ofstream &out, anycubicsla_format_extra &e)
+{
+    out.write(TAG_EXTRA, sizeof(e.tag));
+    anycubicsla_write_int32(out, e.extra0);
+
+    anycubicsla_write_int32(out, e.extra4);
+    anycubicsla_write_float(out, e.lift_distance1_mm);
+    anycubicsla_write_float(out, e.lift_speed1_mms);
+    anycubicsla_write_float(out, e.retract_speed1_mms);
+    anycubicsla_write_float(out, e.lift_distance2_mm);
+    anycubicsla_write_float(out, e.lift_speed2_mms);
+    anycubicsla_write_float(out, e.retract_speed2_mms);
+
+    anycubicsla_write_int32(out, e.extra32);
+    anycubicsla_write_float(out, e.lift_distance3_mm);
+    anycubicsla_write_float(out, e.lift_speed3_mms);
+    anycubicsla_write_float(out, e.retract_speed3_mms);
+    anycubicsla_write_float(out, e.lift_distance4_mm);
+    anycubicsla_write_float(out, e.lift_speed4_mms);
+    anycubicsla_write_float(out, e.retract_speed4_mms);
+}
+
+static void anycubicsla_write_machine(std::ofstream &out, anycubicsla_format_machine &m)
+{
+    out.write(TAG_MACHINE, sizeof(m.tag));
+    anycubicsla_write_int32(out, m.payload_size);
+
+    out.write(m.name, sizeof(m.name));
+    out.write(m.image_format, sizeof(m.image_format));
+    anycubicsla_write_float(out, m.volume_x);
+    anycubicsla_write_float(out, m.volume_y);
+    anycubicsla_write_float(out, m.volume_z);
+    anycubicsla_write_int32(out, m.version);
+    anycubicsla_write_int32(out, m.machine140);
+}
+
+static void anycubicsla_write_model(std::ofstream &out, anycubicsla_format_model &m)
+{
+    out.write(TAG_MODEL, sizeof(m.tag));
+    anycubicsla_write_int32(out, m.payload_size);
+
+    anycubicsla_write_float(out, m.minX);
+    anycubicsla_write_float(out, m.minY);
+    anycubicsla_write_float(out, m.minZ);
+    anycubicsla_write_float(out, m.maxX);
+    anycubicsla_write_float(out, m.maxY);
+    anycubicsla_write_float(out, m.maxZ);
+    anycubicsla_write_int32(out, m.supports_enabled);
+    anycubicsla_write_float(out, m.supports_density);
+}
+
+static void anycubicsla_write_software(std::ofstream &out, anycubicsla_format_software &s)
+{
+    out.write(m.name, sizeof(m.name));
+    anycubicsla_write_int32(out, m.payload_size);
+    out.write(m.version, sizeof(m.version));
+    out.write(m.operating_system, sizeof(m.operating_system));
+    out.write(m.opengl_version, sizeof(m.opengl_version));
 }
 
 static void anycubicsla_write_layers_header(std::ofstream &out, anycubicsla_format_layers_header &h)
@@ -502,31 +840,102 @@ void AnycubicSLAArchive::export_print(const std::string     fname,
     anycubicsla_format_header        header = {};
     anycubicsla_format_preview       preview = {};
     anycubicsla_format_layers_header layers_header = {};
+    anycubicsla_format_layers_color    color = {};
     anycubicsla_format_misc          misc = {};
+    anycubicsla_format_extra         extra = {};
+    anycubicsla_format_machine       machine = {};
+
     std::vector<uint8_t>      layer_images;
     std::uint32_t             image_offset;
 
-    assert(m_version == ANYCUBIC_SLA_FORMAT_VERSION_1);
+    assert(m_version <= ANYCUBIC_SLA_FORMAT_VERSION_516);
+
 
     intro.version             = m_version;
     intro.area_num            = 4;
+    switch m_version {
+        case ANYCUBIC_SLA_FORMAT_VERSION_1:
+            intro.area_num            = 4;
+            break;
+        case ANYCUBIC_SLA_FORMAT_VERSION_515:
+            intro.area_num            =  5;
+            break;
+        case ANYCUBIC_SLA_FORMAT_VERSION_516:
+            intro.area_num            = 8;
+            break;
+        case NYCUBIC_SLA_FORMAT_VERSION_517:
+            intro.area_num            =  9;
+            break;
+    }
+
     intro.header_data_offset  = sizeof(intro);
-    intro.preview_data_offset = sizeof(intro) + sizeof(header);
-    intro.layer_data_offset   = intro.preview_data_offset + sizeof(preview);
-    intro.image_data_offset = intro.layer_data_offset +
-                              sizeof(layers_header) +
-                              (sizeof(anycubicsla_format_layer) * layer_count);
+
+    if (version <= ANYCUBIC_SLA_FORMAT_VERSION_515) {
+        // v1 and v515 dont use machine data offset - reduce size by 4 
+        intro.header_data_offset -= sizeof(intro.machine_data_offset)
+    } else  if (version <= ANYCUBIC_SLA_FORMAT_VERSION_516) {
+        // <517 dont use model data offset - reduce size by 4 
+        intro.header_data_offset -= sizeof(intro.model_data_offset);
+    }
+
+    intro.preview_data_offset = intro.header_data_offset + sizeof(header);
 
     fill_header(header, misc, print, layer_count);
     fill_preview(preview, misc, thumbnails);
+
+    // 515 introduced grayscale lookup table
+    if version >= ANYCUBIC_SLA_FORMAT_VERSION_515 {
+        //Fill greyscale lookup, dont use it, required from 516 onward
+        fill_color(color);
+
+        //v1 calculates the preview payload size incorrectly, fixed with 515
+        preview.payload_size = sizeof(p);
+
+        intro.layer_color_offset = intro.preview_data_offset + sizeof(preview);
+        intro.layer_data_offset  = intro.layer_color_offset + sizeof(color);
+    } else {
+        intro.layer_data_offset  = intro.preview_data_offset + sizeof(preview);
+    }
+    // Image data following the layers
+    intro.image_data_offset = intro.layer_data_offset +
+                    sizeof(layers_header) +
+                    (sizeof(anycubicsla_format_layer) * layer_count);
+
+    // Introduced with 516: Extra settings and machine settings
+    if version >= ANYCUBIC_SLA_FORMAT_VERSION_516) {
+        fill_extra(extra, print);
+        fill_machine(machine, print, intro.version);
+
+        // Extra is following the layers but before image data
+        intro.extra_data_offset = intro.image_data_offset;
+        intro.machine_data_offset = intro.extra_data_offset +  sizeof(extra);
+        intro.image_data_offset = intro.machine_data_offset + sizeof(machine);
+    } else {
+
+    }
+
+    // Introduced with 517: Software definition and model definition
+    if version >= ANYCUBIC_SLA_FORMAT_VERSION_517) {
+        // FIXME
+        fill_software(software);
+        fill_model(model);
+
+        // software / model is following the extra but before image data
+        intro.software_data_offset = intro.image_data_offset;
+        intro.model_data_offset = intro.software_data_offset + sizeof(software);
+        intro.image_data_offset = intro.model_data_offset + sizeof(model);
+    }
 
     try {
         // open the file and write the contents
         std::ofstream out;
         out.open(fname, std::ios::binary | std::ios::out | std::ios::trunc);
         anycubicsla_write_intro(out, intro);
-        anycubicsla_write_header(out, header);
+        anycubicsla_write_header(out, header, m_version);
         anycubicsla_write_preview(out, preview);
+        if (intro.layer_color_offset != 0) {
+            anycubicsla_write_layer_color(out, color);
+        }
 
         layers_header.payload_size = intro.image_data_offset - intro.layer_data_offset -
                         sizeof(layers_header.tag)  - sizeof(layers_header.payload_size);
@@ -560,6 +969,18 @@ void AnycubicSLAArchive::export_print(const std::string     fname,
             const char* img_end = img_start + rst.size();
             std::copy(img_start, img_end, std::back_inserter(layer_images));
             i++;
+        }
+        if (intro.extra_data_offset != 0) {
+            anycubicsla_write_extra(out, extra);
+        }
+        if (intro.machine_data_offset != 0) {
+            anycubicsla_write_machine(out, machine);
+        }
+        if (intro.software_data_offset != 0) {
+            anycubicsla_write_software(out, software);
+        }
+        if (intro.model_data_offset != 0) {
+            anycubicsla_write_model(out, model);
         }
         const char* img_buffer = reinterpret_cast<const char*>(layer_images.data());
         out.write(img_buffer, layer_images.size());
